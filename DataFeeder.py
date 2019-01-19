@@ -1,27 +1,79 @@
 from WikiLoader import WikiDataLoader
 from Tokenizer import Tokenizer
 from Vocabulary import Vocabulary
-import sys
-import numpy as np
-import pickle
 from BayesSkipGram import model_fast as model
-import tensorflow as tf
+# import tensorflow as tf
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 from pprint import pprint
 
 from collections import Counter
+import sys
+import numpy as np
+import pickle
 
-batch_size=1000
-context_len=4
-active_vocab_size=10000
-embedding_size = 200
-epochs = 10
+
+BATCH_SIZE=1000
+CONTEXT_CAPACITY=4
+ACTIVE_VOC_SIZE=10000
+EMB_SIZE = 200
+EPOCHS = 10
+WIKI_PATH = "/Users/LTV/dev/EnWiki"
+
+if CONTEXT_CAPACITY % 2 != 0:
+        raise ValueError("Context length should be even")
+
+
+class DataFeeder:
+    """
+    Implements data feeder interface. Requires vocabulary with method
+    getId. Provides interface for returning next context. Trims context
+    with new line character.
+    """
+    def __init__(self, voc, source="wiki", path=""):
+        if source != "wiki":
+            raise NotImplementedError
+        
+        if source == "wiki" and path == "":
+            raise ValueError("Provide path for wiki location")
+
+        self.CONT_W = CONTEXT_CAPACITY + 1
+        self.source = WikiDataLoader(path, jsonf=True)
+        self.tok = Tokenizer()
+
+        self.cDoc = None
+
+    def nextDoc(self):
+
+        nDoc = self.source.next_doc()
+
+        if nDoc is None:
+            return None
+        
+        self.cDoc = nDoc.split("\n")
+
+    def nextLine(self):
+
+        if not self.cDoc:
+            self.nextDoc()
+        if self.cDoc:
+            return self.tok(self.cDoc.pop(0))
+        else:
+            return None
+
+df = DataFeeder("voc", path=WIKI_PATH)  
+
+line = df.nextLine()
+while line is not None:
+    while line == "":
+        line = df.nextLine()
+    line = df.nextLine()
+sys.exit()
 
 
 def tsne(savepath, embs, voc):
     # sample = np.random.randint(embs.shape[0],size=5000)
-    sample = np.arange(active_vocab_size)
+    sample = np.arange(ACTIVE_VOC_SIZE)
     new_values = TSNE(n_components=2).fit_transform(
                                             embs[sample])
 
@@ -45,12 +97,12 @@ def tsne(savepath, embs, voc):
     # plt.close()
 
 def prep_dataset():
-    wiki_path = "/home/ltv/data/wikipedia/en_wiki_plain"
+    wiki_path = WIKI_PATH
 
-    if context_len % 2 != 0:
+    if CONTEXT_CAPACITY % 2 != 0:
         raise Exception("Context length should be even")
 
-    context_window = context_len + 1
+    context_window = CONTEXT_CAPACITY + 1
 
     print("Loading...",end = "")
     wiki = WikiDataLoader(wiki_path)
@@ -87,7 +139,7 @@ def prep_dataset():
 
 # prep_dataset()
 voc = pickle.load(open("WikiPrepVoc.pkl", "rb"))
-model = model(emb_size = embedding_size, context_p_negative = 2*context_len+1, voc_size = active_vocab_size, minibatch_size=batch_size)
+model = model(emb_size = EMB_SIZE, context_p_negative = 2*CONTEXT_CAPACITY+1, voc_size = ACTIVE_VOC_SIZE, miniBATCH_SIZE=BATCH_SIZE)
 
 # sys.exit()
 
@@ -119,10 +171,10 @@ class PrepDataReader:
         self.doc.close()
         self.open()
 
-    def next_batch(self, batch_size, clip_ids=-1):
+    def next_batch(self, BATCH_SIZE, clip_ids=-1):
         try:
-            vals = " ".join(self.doc.readline().strip() for b in range(batch_size))
-            batch = np.fromstring(vals, dtype=int, sep=' ').reshape(batch_size, context_len + 1)
+            vals = " ".join(self.doc.readline().strip() for b in range(BATCH_SIZE))
+            batch = np.fromstring(vals, dtype=int, sep=' ').reshape(BATCH_SIZE, CONTEXT_CAPACITY + 1)
             if clip_ids != -1:
                 batch[batch >= clip_ids] = 0
         except:
@@ -149,22 +201,22 @@ with tf.Session() as sess:
 
 
     try:
-        for e in range(epochs):
+        for e in range(EPOCHS):
             data.reset()
 
-            batch = data.next_batch(batch_size=batch_size, clip_ids=active_vocab_size)
+            batch = data.next_batch(BATCH_SIZE=BATCH_SIZE, clip_ids=ACTIVE_VOC_SIZE)
             while batch is not None:
                 i += 1
                 # bring central word to the front
-                contral_word_pos = int((context_len)/2)
+                contral_word_pos = int((CONTEXT_CAPACITY)/2)
 
-                indexer = np.concatenate([np.array([contral_word_pos]), np.arange(contral_word_pos), np.arange(contral_word_pos+1, context_len+1)])
-                b = np.concatenate([batch[:,indexer], neg_stream.get(batch_size,context_len,limit_top=active_vocab_size)], axis=1)
+                indexer = np.concatenate([np.array([contral_word_pos]), np.arange(contral_word_pos), np.arange(contral_word_pos+1, CONTEXT_CAPACITY+1)])
+                b = np.concatenate([batch[:,indexer], neg_stream.get(BATCH_SIZE,CONTEXT_CAPACITY,limit_top=ACTIVE_VOC_SIZE)], axis=1)
                 _, l = sess.run([model['train'], model['loss']], {model['wids']:b})
                 print(l)
                 # if i % 1000 == 0:
                 #     print(l)
-                line = data.next_batch(batch_size=batch_size, clip_ids=active_vocab_size)
+                line = data.next_batch(BATCH_SIZE=BATCH_SIZE, clip_ids=ACTIVE_VOC_SIZE)
                 # break
 
 
